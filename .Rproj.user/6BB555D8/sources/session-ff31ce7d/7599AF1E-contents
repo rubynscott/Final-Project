@@ -1,0 +1,187 @@
+library(tidyverse)
+
+# For these stations and years...
+station_ids <- c(46053, 46042, 51000)
+years <- 2010:2023
+
+# Read buoy data given station id and year
+read_buoy <- function(st_id, yr) {
+  tryCatch({
+    # Construct URL
+    url <- str_glue("https://www.ndbc.noaa.gov/view_text_file.php?filename={st_id}h{yr}.txt.gz&dir=data/historical/stdmet/")
+    # Download data to a temporary file
+    buoy_file <- tempfile()
+    download.file(url, buoy_file)
+    # Replace multi-character delimiters with tabs
+    readLines(buoy_file) %>%
+      str_replace_all("[ ]+", "\t") %>%
+      str_replace("\t$", "") %>%
+      writeLines(buoy_file)
+    # Construct column names
+    buoy_cols <- readLines(buoy_file, 2) %>%
+      str_replace("[#]", "") %>%
+      str_split("\\s+") %>%
+      do.call(paste0, .,) %>%
+      str_replace("/", "_")
+    # Read data
+    result <- read_delim(buoy_file,
+                         skip = 2,
+                         col_names = buoy_cols,
+                         col_types = paste(rep("d", length(buoy_cols)),
+                                           collapse = ""),
+                         delim = "\t") %>%
+      mutate(across(everything(), \(col) ifelse(col == 99, NA, col)),
+             station_id = st_id) %>%
+      relocate(station_id)
+    # Delete temporary file
+    file.remove(buoy_file)
+    result
+  }, error = function(e) NULL)
+}
+
+# Download all available data
+buoy_data <- expand_grid(
+  station_id = station_ids,
+  year = years
+) %>%
+  mutate(df = map2(station_id, year, read_buoy)) %>%
+  pull(df) %>%
+  list_rbind()
+
+#Creating data frame of only the information that I want
+buoy_simple <- buoy_data %>%
+  mutate(WTMPdegC = na_if(WTMPdegC, 999)) %>%
+  select(station_id, YYyr, MMmo, WSPDm_s, WVHTm, DPDsec, WTMPdegC) %>%
+  filter(YYyr != 2009) %>%
+  group_by(station_id, MMmo)%>%
+  summarize(across(WSPDm_s:WTMPdegC,
+                   function(x) mean(x, na.rm = TRUE),
+                   .names = "avg_{.col}"),
+            .groups = "drop") %>%
+  mutate(station_id = factor(station_id,
+                             levels = c(46042, 46053, 51000),
+                             labels = c("Point Conception", "Monterey", "Hawaii")),
+         avg_WSPDmph = avg_WSPDm_s * 2.23694,
+         avg_WVHTft = avg_WVHTm * 3.28084,
+         avg_WTMPdegF = (avg_WTMPdegC + 32))
+
+
+#Creates the visual plot for all three plots throughout the span of a year
+
+#wind speed plot
+ggplot(buoy_simple, aes(MMmo, avg_WSPDmph, color = station_id)) +
+  geom_line() +
+  theme_bw()
+
+#wave height plot
+ggplot(buoy_simple, aes(MMmo, avg_WVHTft, color = station_id)) +
+  geom_line() +
+  theme_bw()
+
+#dominant period plot
+ggplot(buoy_simple, aes(MMmo, avg_DPDsec, color = station_id)) +
+  geom_line() +
+  theme_bw()
+
+#water temperature plot
+ggplot(buoy_simple, aes(MMmo, avg_WTMPdegF, color = station_id)) +
+  geom_line() +
+  theme_bw()
+
+#Get best month for each place each variable
+
+#POINT CONCEPTION
+point_conc <- buoy_simple[buoy_simple$station_id == "Point Conception", ]
+
+#wind
+min_wind_month_PC <- which.min(point_conc$avg_WSPDmph)
+point_conc$MMmo[min_wind_month_PC]
+#8th month
+point_conc$avg_WSPDmph[min_wind_month_PC]
+#10.93406 mph
+
+#wave
+max_wave_month_PC <- which.max(point_conc$avg_WVHTft)
+point_conc$MMmo[max_wave_month_PC]
+#1st month
+point_conc$avg_WVHTft[max_wave_month_PC]
+#9.170838ft
+
+#period
+min_period_month_PC <- which.min(point_conc$avg_DPDsec)
+point_conc$MMmo[min_period_month_PC]
+#7th month
+point_conc$avg_DPDsec[min_period_month_PC]
+#10.17584 sec
+
+#temperature
+max_temp_month_PC <- which.max(point_conc$avg_WTMPdegF)
+point_conc$MMmo[max_temp_month_PC]
+#9th month
+point_conc$avg_WTMPdegF[max_temp_month_PC]
+#47.60466 degrees F
+
+
+#MONTEREY
+monterey <- buoy_simple[buoy_simple$station_id == "Monterey", ]
+
+#wind
+min_wind_month_M <- which.min(monterey$avg_WSPDmph)
+monterey$MMmo[min_wind_month_M]
+#11th month
+monterey$avg_WSPDmph[min_wind_month_M]
+#8.177222 mph
+
+#wave
+max_wave_month_M <- which.max(monterey$avg_WVHTft)
+monterey$MMmo[max_wave_month_M]
+#1st month
+monterey$avg_WVHTft[max_wave_month_M]
+#5.335734 ft
+
+#period
+min_period_month_M <- which.min(monterey$avg_DPDsec)
+monterey$MMmo[min_period_month_M]
+#7th month
+monterey$avg_DPDsec[min_period_month_M]
+#7.741714 sec
+
+#temperature
+max_temp_month_M <- which.max(monterey$avg_WTMPdegF)
+monterey$MMmo[max_temp_month_M]
+#9th month
+monterey$avg_WTMPdegF[max_temp_month_M]
+#51.00056 degrees F
+
+
+#HAWAII
+hawaii <- buoy_simple[buoy_simple$station_id == "Hawaii", ]
+
+#wind
+min_wind_month_H <- which.min(hawaii$avg_WSPDmph)
+hawaii$MMmo[min_wind_month_H]
+#10th month
+hawaii$avg_WSPDmph[min_wind_month_H]
+#12.61163 mph
+
+#wave
+max_wave_month_H <- which.max(hawaii$avg_WVHTft)
+hawaii$MMmo[max_wave_month_H]
+#1st month
+hawaii$avg_WVHTft[max_wave_month_H]
+#9.818537 ft
+
+#period
+min_period_month_H <- which.min(hawaii$avg_DPDsec)
+hawaii$MMmo[min_period_month_H]
+#7th month
+hawaii$avg_DPDsec[min_period_month_H]
+#8.933002 sec
+
+#temperature
+max_temp_month_H <- which.min(hawaii$avg_WTMPdegF)
+hawaii$MMmo[max_temp_month_H]
+#3rd month
+monterey$avg_WTMPdegF[max_temp_month_H]
+#45.47225 degrees F
+
